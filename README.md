@@ -26,12 +26,11 @@ GeoStor is a work-in-progress aiming to provide:
 ### Prerequisites
 - Python 3.x
 - SQLite3
-- (Optional) Dependencies for additional features (to be updated)
 
 ### Installation
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/geostor.git
+   git clone https://github.com/schutcher/geostor.git
 
 ---
 
