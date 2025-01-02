@@ -33,6 +33,8 @@ GeoStor is a work-in-progress aiming to provide:
    ```bash
    git clone https://github.com/yourusername/geostor.git
 
+---
+
 ## **Roadmap**
 
 - **Phase 1**: Establish a robust database structure for geotechnical data.
