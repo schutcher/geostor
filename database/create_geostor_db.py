@@ -1,6 +1,8 @@
 import sqlite3
 import os
 
+
+
 def create_geostor_database(db_path="geostor/database/geostor.db"):
     """
     Creates a SQLite database (if it doesn't already exist) in the 'database' folder
@@ -12,6 +14,9 @@ def create_geostor_database(db_path="geostor/database/geostor.db"):
     
     connection = sqlite3.connect(db_path)
     cursor = connection.cursor()
+
+    # Enable foreign keys if not already enabled
+    connection.execute("PRAGMA foreign_keys = ON;")    
 
     create_project_table_query = '''
     CREATE TABLE IF NOT EXISTS project (
@@ -95,6 +100,51 @@ def create_geostor_database(db_path="geostor/database/geostor.db"):
     """
     cursor.execute(create_abbreviations_table_query)
     connection.commit()
+
+    create_sample_table_query = """
+    CREATE TABLE IF NOT EXISTS sample (
+        sample_id INTEGER PRIMARY KEY AUTOINCREMENT,    -- Unique sample identifier
+        location_id INTEGER NOT NULL,                   -- Foreign key referencing 'location' table
+        sample_top_depth REAL NOT NULL,                 -- Depth to top of sample (required)
+        sample_reference TEXT NOT NULL,                 -- Sample reference (required)
+        sample_type TEXT NOT NULL,                      -- Sample type (required)
+        sample_base_depth REAL,                         -- Depth to base of sample
+        sample_date_time TEXT,                          -- Date and time sample taken
+        sample_blows INTEGER,                           -- Number of blows to drive sampler (SAMP_UBLO)
+        sample_container TEXT,                          -- Sample container
+        sample_preparation TEXT,                        -- Details of sample preparation at time of sampling
+        sample_diameter REAL,                           -- Sample diameter
+        sample_water_depth REAL,                        -- Depth to water at time of sampling
+        sample_recovery_percent REAL,                   -- Percentage of sample recovered
+        sample_method TEXT,                             -- Sampling technique/method (SAMP_TECH)
+        sample_matrix TEXT,                             -- Sample matrix
+        sample_qa_type TEXT,                            -- Sample QA type (SAMP_TYPC)
+        sample_collector TEXT,                          -- Sampler's initials or name (SAMP_WHO)
+        sample_reason TEXT,                             -- Reason for sampling (SAMP_WHY)
+        sample_remarks TEXT,                            -- Sample remarks
+        sample_description TEXT,                        -- Sample/specimen description
+        sample_description_date TEXT,                   -- Date sample described
+        sample_logger TEXT,                             -- Person responsible for sample description
+        sample_condition TEXT,                          -- Condition/representativeness of sample
+        sample_classification TEXT,                     -- Classification per EN ISO 14688-1
+        sample_barometric_pressure REAL,                -- Barometric pressure at time of sampling
+        sample_temperature REAL,                        -- Sample temperature at time of sampling
+        sample_gas_pressure REAL,                       -- Gas pressure (above barometric)
+        sample_gas_flow_rate REAL,                      -- Gas flow rate
+        sample_end_date_time TEXT,                      -- Date/time sampling completed
+        sample_duration TEXT,                           -- Sampling duration
+        sample_caption TEXT,                            -- Caption used to describe sample
+        sample_record_link TEXT,                        -- Sample record link
+        sample_stratum_reference TEXT,                  -- Stratum reference (GEOL_STAT)
+        file_reference TEXT,                            -- Associated file reference
+        sample_recovery_length REAL,                    -- Length of sample recovered
+
+        FOREIGN KEY (location_id) REFERENCES location(location_id)
+    )
+    """
+
+    cursor.execute(create_sample_table_query)
+    connection.commit()    
 
     connection.close()
     print(f"Database created/updated successfully at '{db_path}'.")
