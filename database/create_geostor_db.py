@@ -144,7 +144,58 @@ def create_geostor_database(db_path="geostor/database/geostor.db"):
     """
 
     cursor.execute(create_sample_table_query)
-    connection.commit()    
+    connection.commit()   
+
+        # Create Liquid Limit Raw Data Table
+    create_liquid_limit_table = """
+    CREATE TABLE IF NOT EXISTS liquidlimit (
+        ll_id INTEGER PRIMARY KEY AUTOINCREMENT,      -- Surrogate primary key
+        sample_id INTEGER NOT NULL,                   -- Foreign key to 'sample' table
+        trial INTEGER NOT NULL,                       -- Trial number
+        drops REAL NOT NULL,                          -- Number of drops
+        tare REAL NOT NULL,                           -- Tare weight
+        taremoist REAL NOT NULL,                      -- Moist weight with tare
+        taredry REAL NOT NULL,                        -- Dry weight with tare
+        is_active INTEGER DEFAULT 1,                 -- Flag for active/inactive data
+        FOREIGN KEY (sample_id) REFERENCES sample(sample_id)
+    )
+    """
+    cursor.execute(create_liquid_limit_table)
+    connection.commit()
+
+    # Create Plastic Limit Raw Data Table
+    create_plastic_limit_table = """
+    CREATE TABLE IF NOT EXISTS plasticlimit (
+        pl_id INTEGER PRIMARY KEY AUTOINCREMENT,      -- Surrogate primary key
+        sample_id INTEGER NOT NULL,                   -- Foreign key to 'sample' table
+        trial INTEGER NOT NULL,                       -- Trial number
+        tare REAL NOT NULL,                           -- Tare weight
+        taremoist REAL NOT NULL,                      -- Moist weight with tare
+        taredry REAL NOT NULL,                        -- Dry weight with tare
+        is_active INTEGER DEFAULT 1,                 -- Flag for active/inactive data
+        FOREIGN KEY (sample_id) REFERENCES sample(sample_id)
+    )
+    """
+    cursor.execute(create_plastic_limit_table)
+    connection.commit()
+
+    # Create Atterberg Limits Final Values Table
+    create_atterberg_limits_table = """
+    CREATE TABLE IF NOT EXISTS atterberglimits (
+        atterberg_id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Surrogate primary key
+        sample_id INTEGER NOT NULL,                     -- Foreign key to 'sample' table
+        liquid_limit REAL,                               -- Calculated Liquid Limit
+        plastic_limit REAL,                              -- Calculated Plastic Limit
+        plasticity_index REAL,                           -- Calculated Plasticity Index
+        soil_description TEXT DEFAULT 'NP',             -- Soil description (default NP)
+        date_calculated TEXT DEFAULT CURRENT_TIMESTAMP, -- Timestamp of calculation
+        is_active INTEGER DEFAULT 1,                    -- Flag for active/inactive data
+        FOREIGN KEY (sample_id) REFERENCES sample(sample_id)
+    )
+    """
+    cursor.execute(create_atterberg_limits_table)
+    connection.commit()
+ 
 
     connection.close()
     print(f"Database created/updated successfully at '{db_path}'.")
