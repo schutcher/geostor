@@ -176,11 +176,16 @@ class MainWindow(QMainWindow):
             self.views["Project"].project_selected.connect(self.on_project_selected)
             self.stack.insertWidget(0, self.views["Project"])  # Insert at the start
             
-            # Initialize LocationsView with database connection
+            # Initialize views with database connection
             if self.views["Locations"]:
                 self.stack.removeWidget(self.views["Locations"])
             self.views["Locations"] = LocationsView(self.db_ops)
             self.stack.addWidget(self.views["Locations"])
+            
+            if self.views["Samples"]:
+                self.stack.removeWidget(self.views["Samples"])
+            self.views["Samples"] = SamplesView()
+            self.stack.addWidget(self.views["Samples"])
             
             # Switch to project view
             self.stack.setCurrentWidget(self.views["Project"])
@@ -218,9 +223,11 @@ class MainWindow(QMainWindow):
             self.current_project_name = project.name
             self.project_status.setText(f"Project: {project.name}")
             
-            # Update locations view with new project
+            # Update views with new project
             if isinstance(self.views["Locations"], LocationsView):
                 self.views["Locations"].set_project(project_id)
+            if isinstance(self.views["Samples"], SamplesView):
+                self.views["Samples"].set_project(project, self.db_ops)
             
             # Enable all navigation buttons
             for btn in self.nav_buttons.values():

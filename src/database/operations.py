@@ -29,8 +29,13 @@ class DatabaseOperations:
             project = Project(name=name, **kwargs)
             session.add(project)
             session.commit()
+            # Get the ID and refresh the object to ensure all attributes are loaded
+            project_id = project.id
+            session.refresh(project)
+            # Expunge the object from the session so it can be used after session close
+            session.expunge(project)
             session.close()
-            return True, "Project created successfully", project.id
+            return True, "Project created successfully", project_id
         except IntegrityError:
             session.rollback()
             session.close()
@@ -115,8 +120,13 @@ class DatabaseOperations:
             location = Location(project_id=project_id, name=name, **kwargs)
             session.add(location)
             session.commit()
+            # Get the ID and refresh the object to ensure all attributes are loaded
+            location_id = location.id
+            session.refresh(location)
+            # Expunge the object from the session so it can be used after session close
+            session.expunge(location)
             session.close()
-            return True, "Location created successfully", location.id
+            return True, "Location created successfully", location_id
         except IntegrityError:
             session.rollback()
             session.close()
@@ -240,6 +250,61 @@ class DatabaseOperations:
             print(f"Error getting samples: {str(e)}")
             session.close()
             return []
+    
+    def get_sample(self, sample_id: int) -> Optional[Sample]:
+        """Get a sample by ID"""
+        session = self.get_session()
+        try:
+            sample = session.query(Sample).get(sample_id)
+            if sample:
+                session.refresh(sample)
+            session.expunge_all()
+            session.close()
+            return sample
+        except Exception as e:
+            print(f"Error getting sample: {str(e)}")
+            session.close()
+            return None
+    
+    def update_sample(self, sample_id: int, **kwargs) -> Tuple[bool, str]:
+        """Update an existing sample"""
+        session = self.get_session()
+        try:
+            sample = session.query(Sample).get(sample_id)
+            if not sample:
+                session.close()
+                return False, f"Sample with ID {sample_id} not found"
+            
+            # Update sample fields
+            for key, value in kwargs.items():
+                if hasattr(sample, key):
+                    setattr(sample, key, value)
+            
+            session.commit()
+            session.close()
+            return True, "Sample updated successfully"
+        except Exception as e:
+            session.rollback()
+            session.close()
+            return False, f"Error updating sample: {str(e)}"
+    
+    def delete_sample(self, sample_id: int) -> Tuple[bool, str]:
+        """Delete a sample"""
+        session = self.get_session()
+        try:
+            sample = session.query(Sample).get(sample_id)
+            if not sample:
+                session.close()
+                return False, f"Sample with ID {sample_id} not found"
+            
+            session.delete(sample)
+            session.commit()
+            session.close()
+            return True, "Sample deleted successfully"
+        except Exception as e:
+            session.rollback()
+            session.close()
+            return False, f"Error deleting sample: {str(e)}"
     
     # Geology operations
     def create_geology(self, location_id: int, top_depth: float, bottom_depth: float, **kwargs) -> Tuple[bool, str, Optional[int]]:

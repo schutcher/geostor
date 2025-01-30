@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QPushButton, QLineEdit, QTextEdit, QLabel,
-    QComboBox, QMessageBox, QWidget
+    QComboBox, QMessageBox, QWidget, QFileDialog, QScrollArea
 )
 from PySide6.QtCore import Qt
 

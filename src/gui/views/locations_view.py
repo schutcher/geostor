@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QFrame, QHeaderView, QSplitter,
-    QLabel, QPushButton, QToolBar, QMessageBox, QDialog
+    QLabel, QPushButton, QToolBar, QMessageBox, QDialog,
+    QTabWidget
 )
 from PySide6.QtCore import Qt, QObject, Slot, Signal
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -13,7 +14,9 @@ import json
 from .base_view import BaseView
 from ..dialogs.location_dialog import LocationDialog
 from ..map_utils import get_map_html_template
-
+from ..widgets.sample_summary_table import SampleSummaryTable
+from sqlalchemy.orm import joinedload
+from ...database.models import Location
 
 class Bridge(QObject):
     """Bridge class for JavaScript communication"""
@@ -153,18 +156,28 @@ class LocationsView(BaseView):
         bottom_layout = QVBoxLayout(bottom_widget)
         bottom_layout.setContentsMargins(5, 5, 5, 5)
         
-        # Add placeholder label
-        placeholder_label = QLabel("Location Data Summary (Coming Soon)")
-        placeholder_label.setAlignment(Qt.AlignCenter)
-        bottom_layout.addWidget(placeholder_label)
+        # Add title for summary section
+        summary_title = QLabel("Location Data Summary")
+        summary_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        bottom_layout.addWidget(summary_title)
+        
+        # Create tab widget for different summaries
+        self.summary_tabs = QTabWidget()
+        
+        # Create and add sample summary tab
+        self.sample_summary = SampleSummaryTable()
+        self.summary_tabs.addTab(self.sample_summary, "Samples")
+        
+        # Add tab widget to bottom layout
+        bottom_layout.addWidget(self.summary_tabs)
         
         # Add widgets to vertical splitter
         self.vertical_splitter.addWidget(top_widget)
         self.vertical_splitter.addWidget(bottom_widget)
         
-        # Set the vertical split ratio (50/50)
+        # Set the vertical split ratio (70/30)
         total_height = self.height()
-        self.vertical_splitter.setSizes([int(total_height * 0.5), int(total_height * 0.5)])
+        self.vertical_splitter.setSizes([int(total_height * 0.7), int(total_height * 0.3)])
         
         # Add splitter to main layout
         self.main_layout.addWidget(self.vertical_splitter)
@@ -182,7 +195,7 @@ class LocationsView(BaseView):
         
         # Connect table selection
         self.locations_table.itemSelectionChanged.connect(self.on_selection_changed)
-    
+
     def setup_locations_table(self):
         """Setup the locations table with all fields"""
         # Define columns
@@ -230,106 +243,79 @@ class LocationsView(BaseView):
             return
             
         location_id = self.selected_location.id
+        self.move_mode = checked
+        
+        # Toggle marker dragging state
+        self.map_view.page().runJavaScript(f'toggleMarkerDrag("{location_id}", {str(checked).lower()});')
         
         if checked:
-            self.move_mode = True
-            # Enable marker dragging
-            self.map_view.page().runJavaScript(f'toggleMarkerDrag("{location_id}", true);')
             QMessageBox.information(
                 self,
                 "Move Location",
-                "Drag the marker to the new location, then click 'Move Location' again to save changes."
+                "Drag the marker to the new location. Changes will be saved automatically."
             )
-        else:
-            # Get the current marker position before disabling dragging
-            self.map_view.page().runJavaScript(
-                f'(function() {{ var marker = markers["{location_id}"]; if (marker) {{ return [marker.getLatLng().lat, marker.getLatLng().lng]; }} }})();',
-                self._on_get_marker_position
-            )
-            
-            # Disable marker dragging after getting position
-            self.map_view.page().runJavaScript(f'toggleMarkerDrag("{location_id}", false);')
-    
-    def _on_get_marker_position(self, position):
-        """Callback for getting marker position when saving location move"""
-        if not position or not self.selected_location:
-            self.move_mode = False
-            self.move_location_btn.setChecked(False)
+
+    @Slot(str, float, float)
+    def on_marker_moved(self, location_id, lat, lng):
+        """Handle marker movement and save to database immediately"""
+        if not self.move_mode:
             return
-            
-        lat, lng = position
-        location_id = self.selected_location.id
         
         # Update the location in the database
         success, message = self.db.update_location(int(location_id), lat=lat, lon=lng)
         
-        # Only update UI if database update was successful
+        # Update the UI after database update is complete
         if success:
-            # Turn off move mode
-            self.move_mode = False
-            self.move_location_btn.setChecked(False)
-            
-            # Update the UI after database update is complete
             self.update_locations()
-            QMessageBox.information(self, "Success", "Location updated successfully")
+            # Keep the marker draggable
+            self.map_view.page().runJavaScript(f'toggleMarkerDrag("{location_id}", true);')
         else:
             QMessageBox.warning(self, "Error", f"Failed to update location: {message}")
             # Revert to original position on failure
-            if self.selected_location.lat and self.selected_location.lon:
+            if self.selected_location and self.selected_location.lat and self.selected_location.lon:
                 self.map_view.page().runJavaScript(
                     f'addMarker({self.selected_location.lat}, {self.selected_location.lon}, "{self.selected_location.name}", "{self.selected_location.id}");'
                 )
-    
-    @Slot(str, float, float)
-    def on_marker_moved(self, location_id, lat, lng):
-        """Handle marker movement - only tracks the movement, doesn't save to database"""
-        if not self.move_mode:
-            return
-        
-        # The actual save will happen in toggle_move_mode when the button is clicked again
-        pass
-    
+
     def update_locations(self):
         """Update the locations table and map with current project data"""
-        if not self.db:
+        if not self.project_id or not self.db:
             return
             
-        # Clear existing items
+        # Clear existing data
         self.locations_table.setRowCount(0)
         
         # Get locations for current project
-        locations = self.db.get_locations(self.project_id)
-        if not locations:
-            return
-            
-        # Add locations to table
+        locations = self.db.get_project_locations(self.project_id)
+        
+        # Update table
         for location in locations:
             row = self.locations_table.rowCount()
             self.locations_table.insertRow(row)
             
-            # Create name item and store location ID
+            # Create name item with ID stored in user role
             name_item = QTableWidgetItem(location.name)
-            name_item.setData(Qt.UserRole, location.id)  # Store ID in the name cell
+            name_item.setData(Qt.UserRole, location.id)
             self.locations_table.setItem(row, 0, name_item)
             
-            # Add other data to cells
-            self.locations_table.setItem(row, 1, QTableWidgetItem(location.type))
-            self.locations_table.setItem(row, 2, QTableWidgetItem(location.status))
+            # Add other fields
+            self.locations_table.setItem(row, 1, QTableWidgetItem(location.type or ""))
+            self.locations_table.setItem(row, 2, QTableWidgetItem(location.status or ""))
             self.locations_table.setItem(row, 3, QTableWidgetItem(str(location.lon) if location.lon else ""))
             self.locations_table.setItem(row, 4, QTableWidgetItem(str(location.lat) if location.lat else ""))
             self.locations_table.setItem(row, 5, QTableWidgetItem(str(location.ground_elevation) if location.ground_elevation else ""))
             self.locations_table.setItem(row, 6, QTableWidgetItem(str(location.final_depth) if location.final_depth else ""))
-            self.locations_table.setItem(row, 7, QTableWidgetItem(location.start_date))
-            self.locations_table.setItem(row, 8, QTableWidgetItem(location.end_date))
-            self.locations_table.setItem(row, 9, QTableWidgetItem(location.purpose))
-            self.locations_table.setItem(row, 10, QTableWidgetItem(location.method))
-            self.locations_table.setItem(row, 11, QTableWidgetItem(location.termination_reason))
-            self.locations_table.setItem(row, 12, QTableWidgetItem(location.letter_grid_ref))
+            self.locations_table.setItem(row, 7, QTableWidgetItem(str(location.start_date) if location.start_date else ""))
+            self.locations_table.setItem(row, 8, QTableWidgetItem(str(location.end_date) if location.end_date else ""))
+            self.locations_table.setItem(row, 9, QTableWidgetItem(location.purpose or ""))
+            self.locations_table.setItem(row, 10, QTableWidgetItem(location.method or ""))
+            self.locations_table.setItem(row, 11, QTableWidgetItem(location.termination_reason or ""))
+            self.locations_table.setItem(row, 12, QTableWidgetItem(location.letter_grid_ref or ""))
             self.locations_table.setItem(row, 13, QTableWidgetItem(str(location.local_x) if location.local_x else ""))
             self.locations_table.setItem(row, 14, QTableWidgetItem(str(location.local_y) if location.local_y else ""))
             self.locations_table.setItem(row, 15, QTableWidgetItem(str(location.local_z) if location.local_z else ""))
-            self.locations_table.setItem(row, 16, QTableWidgetItem(location.local_grid_ref_system))
-            self.locations_table.setItem(row, 17, QTableWidgetItem(location.local_datum_system))
+            self.locations_table.setItem(row, 16, QTableWidgetItem(location.local_grid_ref_system or ""))
+            self.locations_table.setItem(row, 17, QTableWidgetItem(location.local_datum_system or ""))
             self.locations_table.setItem(row, 18, QTableWidgetItem(str(location.easting_end_traverse) if location.easting_end_traverse else ""))
             self.locations_table.setItem(row, 19, QTableWidgetItem(str(location.northing_end_traverse) if location.northing_end_traverse else ""))
             self.locations_table.setItem(row, 20, QTableWidgetItem(str(location.ground_level_end_traverse) if location.ground_level_end_traverse else ""))
@@ -338,20 +324,26 @@ class LocationsView(BaseView):
             self.locations_table.setItem(row, 23, QTableWidgetItem(str(location.local_z_end_traverse) if location.local_z_end_traverse else ""))
             self.locations_table.setItem(row, 24, QTableWidgetItem(str(location.end_lat) if location.end_lat else ""))
             self.locations_table.setItem(row, 25, QTableWidgetItem(str(location.end_lon) if location.end_lon else ""))
-            self.locations_table.setItem(row, 26, QTableWidgetItem(location.projection_format))
-            self.locations_table.setItem(row, 27, QTableWidgetItem(location.sub_division))
-            self.locations_table.setItem(row, 28, QTableWidgetItem(location.phase_grouping_code))
-            self.locations_table.setItem(row, 29, QTableWidgetItem(str(location.alignment_id) if location.alignment_id else ""))
+            self.locations_table.setItem(row, 26, QTableWidgetItem(location.projection_format or ""))
+            self.locations_table.setItem(row, 27, QTableWidgetItem(location.sub_division or ""))
+            self.locations_table.setItem(row, 28, QTableWidgetItem(location.phase_grouping_code or ""))
+            self.locations_table.setItem(row, 29, QTableWidgetItem(location.alignment_id or ""))
             self.locations_table.setItem(row, 30, QTableWidgetItem(str(location.offset) if location.offset else ""))
             self.locations_table.setItem(row, 31, QTableWidgetItem(str(location.chainage) if location.chainage else ""))
-            self.locations_table.setItem(row, 32, QTableWidgetItem(location.algorithm_ref))
-            self.locations_table.setItem(row, 33, QTableWidgetItem(location.file_reference))
-            self.locations_table.setItem(row, 34, QTableWidgetItem(location.national_datum_system))
-            self.locations_table.setItem(row, 35, QTableWidgetItem(location.original_hole_id))
-            self.locations_table.setItem(row, 36, QTableWidgetItem(location.original_job_ref))
-            self.locations_table.setItem(row, 37, QTableWidgetItem(location.originating_company))
-            self.locations_table.setItem(row, 38, QTableWidgetItem(location.remarks))
-        
+            self.locations_table.setItem(row, 32, QTableWidgetItem(location.algorithm_ref or ""))
+            self.locations_table.setItem(row, 33, QTableWidgetItem(location.file_reference or ""))
+            self.locations_table.setItem(row, 34, QTableWidgetItem(location.national_datum_system or ""))
+            self.locations_table.setItem(row, 35, QTableWidgetItem(location.original_hole_id or ""))
+            self.locations_table.setItem(row, 36, QTableWidgetItem(location.original_job_ref or ""))
+            self.locations_table.setItem(row, 37, QTableWidgetItem(location.originating_company or ""))
+            self.locations_table.setItem(row, 38, QTableWidgetItem(location.remarks or ""))
+            
+            # Make all cells read-only
+            for col in range(self.locations_table.columnCount()):
+                item = self.locations_table.item(row, col)
+                if item:
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+
         # Update map markers
         self.update_map_markers()
     
@@ -364,7 +356,7 @@ class LocationsView(BaseView):
         self.map_view.page().runJavaScript("clearMarkers();")
         
         # Add markers for each location
-        locations = self.db.get_locations(self.project_id)
+        locations = self.db.get_project_locations(self.project_id)
         has_markers = False
         bounds = []
         
@@ -391,14 +383,13 @@ class LocationsView(BaseView):
         row = selected_items[0].row()
         
         # Get location data
-        name = self.locations_table.item(row, 0).text()
-        lon = self.locations_table.item(row, 3).text()
-        lat = self.locations_table.item(row, 4).text()
+        location_id = self.locations_table.item(row, 0).data(Qt.UserRole)
+        location = self.db.get_location(location_id)
         
         # Center map on selected location if coordinates exist
-        if lon and lat:
+        if location and location.lat and location.lon:
             # Center map using JavaScript
-            js = f'setView({float(lat)}, {float(lon)}, 15);'
+            js = f'setView({float(location.lat)}, {float(location.lon)}, 15);'
             self.map_view.page().runJavaScript(js)
     
     @Slot(str)
@@ -529,28 +520,46 @@ class LocationsView(BaseView):
             self.map_view.page().runJavaScript("resetCursor();")
     
     def on_selection_changed(self):
-        """Handle table selection changes"""
-        has_selection = len(self.locations_table.selectedItems()) > 0
+        """Handle location selection changes"""
+        selected_items = self.locations_table.selectedItems()
+        has_selection = len(selected_items) > 0
+        
+        # Enable/disable buttons
         self.edit_location_btn.setEnabled(has_selection)
         self.delete_location_btn.setEnabled(has_selection)
-
-        selected_items = self.locations_table.selectedItems()
-        if not selected_items:
-            self.selected_location = None
-            self.move_location_btn.setEnabled(False)
+        self.move_location_btn.setEnabled(has_selection)
+        
+        # Update sample summary if a location is selected
+        if has_selection:
+            row = selected_items[0].row()
+            # Get location ID from user role data
+            location_id = self.locations_table.item(row, 0).data(Qt.UserRole)
+            if location_id:
+                self.update_sample_summary(location_id)
+                
+                # Center map on selected location
+                location = self.db.get_location(location_id)
+                if location and location.lat and location.lon:
+                    js = f'setView({location.lat}, {location.lon}, 15);'
+                    self.map_view.page().runJavaScript(js)
+        else:
+            self.sample_summary.update_samples([])
+            
+    def update_sample_summary(self, location_id):
+        """Update the sample summary table for the selected location"""
+        if not self.db:
             return
             
-        # Get location ID from the name cell
-        row = selected_items[0].row()
-        location_id = self.locations_table.item(row, 0).data(Qt.UserRole)
-        if location_id:
-            self.selected_location = self.db.get_location(location_id)
-            self.move_location_btn.setEnabled(True)
+        session = self.db.get_session()
+        try:
+            # Get location with samples
+            location = session.query(Location).options(
+                joinedload(Location.samples)
+            ).get(location_id)
             
-            # Center map on selected location
-            if self.selected_location and self.selected_location.lat and self.selected_location.lon:
-                js = f'setView({self.selected_location.lat}, {self.selected_location.lon}, 15);'
-                self.map_view.page().runJavaScript(js)
-        else:
-            self.selected_location = None
-            self.move_location_btn.setEnabled(False)        
+            if location:
+                self.sample_summary.update_samples(location.samples)
+            else:
+                self.sample_summary.update_samples([])
+        finally:
+            session.close()
